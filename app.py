@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch   # ★追加：凡例用
 
 # --- Streamlit 設定 ---
 st.set_page_config(page_title="Fe–H2O Pourbaix Diagram", layout="wide")
@@ -20,6 +21,9 @@ with st.sidebar:
     log_a_fe3 = st.number_input("log10(Fe3+ activity)", value=-6.0, format="%.1f")
     phase_type = st.radio("Select phase type", ["Oxides only", "Hydroxides only"])
     show_boundary = st.checkbox("Show boundary lines", value=True)
+
+    # ★追加：(5) 沈殿領域を表示するスイッチ
+    show_precip = st.checkbox("Show precipitation region", value=True)
 
 # --- 定数 ---
 F = 96485.3
@@ -80,7 +84,6 @@ phase_map = np.argmin(Psi_stack, axis=0)
 # --- 描画 ---
 colors = ['#94a3b8','#3b82f6','#facc15','#60a5fa','#f87171','#a855f7','#22c55e','#fb923c']
 
-# 英字ラベルのみ（上付き下付きは文字として表現）
 labels_dict = {
     "Fe": "Fe",
     "Fe2+": "Fe2+",
@@ -101,6 +104,29 @@ ax.imshow(
     extent=[0,14,-2.5,2.5],
     aspect='auto'
 )
+
+# =========================================================
+# ★(5) 追加：沈殿しやすい領域（固相が最安定）を塗りつぶし
+# Oxides only なら Fe3O4/Fe2O3、Hydroxides only なら Fe(OH)2/Fe(OH)3 を沈殿相として扱う
+# =========================================================
+if show_precip:
+    if phase_type == "Hydroxides only":
+        precip_phases = ["Fe(OH)2", "Fe(OH)3"]
+    else:
+        precip_phases = ["Fe3O4", "Fe2O3"]
+
+    # phase_mapは「psi_keysの何番が最安定か」を持つので、沈殿相のindexを拾ってマスク化
+    precip_indices = [psi_keys.index(p) for p in precip_phases if p in psi_keys]
+    if len(precip_indices) > 0:
+        precip_mask = np.isin(phase_map, precip_indices).astype(int)
+
+        # マスク(=1)領域のみ半透明で上塗り
+        ax.contourf(
+            PH, E, precip_mask,
+            levels=[0.5, 1.5],
+            colors=["black"],   # 好きな色に変更OK（例："red"）
+            alpha=0.18
+        )
 
 # 水の分解線
 ax.plot(ph_vec, 1.229 - S*ph_vec,'k--', alpha=0.4)
@@ -130,5 +156,14 @@ ax.set_ylim(-2.5,2.5)
 ax.grid(alpha=0.1)
 ax.set_title(f"Fe–H2O Pourbaix Diagram @ {temp_c}°C, log a(Fe2+)={log_a_fe2}, log a(Fe3+)={log_a_fe3}")
 
+# ★追加：(5) 沈殿領域の凡例
+if show_precip:
+    ax.legend(
+        handles=[Patch(facecolor="black", edgecolor="none", alpha=0.18, label="Precipitation region")],
+        loc="upper right",
+        framealpha=0.9
+    )
+
 st.pyplot(fig)
+
 
