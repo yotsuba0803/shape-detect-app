@@ -22,8 +22,8 @@ with st.sidebar:
     phase_type = st.radio("Select phase type", ["Oxides only", "Hydroxides only"])
     show_boundary = st.checkbox("Show boundary lines", value=True)
 
-    # (5) 追加：沈殿領域の表示
-    show_precip = st.checkbox("Show precipitation", value=True)
+    # (5) 表示切替：沈殿領域だけ強調表示
+    highlight_precip_only = st.checkbox("Highlight precipitation only", value=True)
 
 # --- 定数 ---
 F = 96485.3
@@ -69,84 +69,76 @@ def calc_psi(PH, E, phase_type):
 
     return Psi
 
-# --- Psi 計算 ---
 Psi_dict = calc_psi(PH, E, phase_type)
 
 # --- 使用フェーズキー選択 ---
 if phase_type == "Hydroxides only":
     psi_keys = ["Fe", "Fe2+", "Fe3+", "Fe(OH)2", "Fe(OH)3", "HFeO2-"]
+    precip_phases = ["Fe(OH)2", "Fe(OH)3"]
 else:
     psi_keys = ["Fe", "Fe2+", "Fe3+", "Fe3O4", "Fe2O3", "HFeO2-"]
+    precip_phases = ["Fe3O4", "Fe2O3"]
 
 Psi_stack = np.stack([Psi_dict[k] for k in psi_keys], axis=0)
 phase_map = np.argmin(Psi_stack, axis=0)
 
+# --- 沈殿領域マスク作成（固相が最安定の領域） ---
+precip_indices = [psi_keys.index(p) for p in precip_phases if p in psi_keys]
+precip_mask = np.isin(phase_map, precip_indices)
+
 # --- 描画 ---
-colors = ['#94a3b8','#3b82f6','#facc15','#60a5fa','#f87171','#a855f7','#22c55e','#fb923c']
-
-labels_dict = {
-    "Fe": "Fe",
-    "Fe2+": "Fe2+",
-    "Fe3+": "Fe3+",
-    "Fe(OH)2": "Fe(OH)2",
-    "Fe(OH)3": "Fe(OH)3",
-    "Fe3O4": "Fe3O4",
-    "Fe2O3": "Fe2O3",
-    "HFeO2-": "HFeO2-"
-}
-labels = [labels_dict[k] for k in psi_keys]
-
 fig, ax = plt.subplots(figsize=(10, 8), dpi=120)
-ax.imshow(
-    phase_map,
-    origin='lower',
-    cmap=ListedColormap(colors[:len(psi_keys)]),
-    extent=[0, 14, -2.5, 2.5],
-    aspect='auto'
-)
 
-# (5) 追加：沈殿しやすい領域の塗りつぶし（固相が最安定の領域）
-# Oxides only のときは Fe3O4/Fe2O3、水酸化物 only のときは Fe(OH)2/Fe(OH)3 を沈殿相として扱う
-if show_precip:
-    if phase_type == "Hydroxides only":
-        precip_phases = ["Fe(OH)2", "Fe(OH)3"]
-    else:
-        precip_phases = ["Fe3O4", "Fe2O3"]
-
-    precip_indices = [psi_keys.index(p) for p in precip_phases if p in psi_keys]
-    if len(precip_indices) > 0:
-        precip_mask = np.isin(phase_map, precip_indices).astype(int)
-
-        # True(=1) の領域だけを半透明で上塗りする
-        ax.contourf(
-            PH, E, precip_mask,
-            levels=[0.5, 1.5],
-            colors=["black"],
-            alpha=0.18
-        )
+if highlight_precip_only:
+    # 0: 非沈殿（グレー）, 1: 沈殿（色）
+    # ※色はここで1色だけに統一（例：赤）
+    show_map = precip_mask.astype(int)
+    cmap2 = ListedColormap(["#9ca3af", "#ef4444"])  # 灰 + 赤
+    ax.imshow(
+        show_map,
+        origin='lower',
+        cmap=cmap2,
+        extent=[0, 14, -2.5, 2.5],
+        aspect='auto'
+    )
+else:
+    # 従来どおり相をカラフル表示（参考として残す）
+    colors = ['#94a3b8','#3b82f6','#facc15','#60a5fa','#f87171','#a855f7','#22c55e','#fb923c']
+    ax.imshow(
+        phase_map,
+        origin='lower',
+        cmap=ListedColormap(colors[:len(psi_keys)]),
+        extent=[0, 14, -2.5, 2.5],
+        aspect='auto'
+    )
+    # 半透明で沈殿を重ねる
+    ax.contourf(PH, E, precip_mask.astype(int), levels=[0.5, 1.5], colors=["black"], alpha=0.18)
 
 # 水の分解線
 ax.plot(ph_vec, 1.229 - S*ph_vec, 'k--', alpha=0.4)
 ax.plot(ph_vec, 0.0 - S*ph_vec, 'k--', alpha=0.4)
 
-# ラベル描画
-for idx, lab in enumerate(labels):
-    mask = (phase_map == idx)
-    if np.any(mask):
-        ph_c = PH[mask].mean()
-        e_c = E[mask].mean()
-        ax.text(
-            ph_c, e_c, lab, color='black', fontsize=10, ha='center', va='center',
-            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', boxstyle='round')
-        )
-
-# 境界線
+# 境界線（相境界なので、沈殿だけ強調モードでも引ける）
 if show_boundary:
     line_style = {'colors': 'white', 'linewidths': 0.7, 'alpha': 0.6}
     psi_list = [Psi_dict[k] for k in psi_keys]
     for i in range(len(psi_list)):
         for j in range(i+1, len(psi_list)):
             ax.contour(PH, E, psi_list[i] - psi_list[j], levels=[0], **line_style)
+
+# 沈殿相ラベル（沈殿だけ強調表示のときに限定して表示）
+if highlight_precip_only:
+    for p in precip_phases:
+        if p in psi_keys:
+            idx = psi_keys.index(p)
+            mask = (phase_map == idx)
+            if np.any(mask):
+                ph_c = PH[mask].mean()
+                e_c = E[mask].mean()
+                ax.text(
+                    ph_c, e_c, p, color='black', fontsize=10, ha='center', va='center',
+                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round')
+                )
 
 ax.set_xlabel("pH")
 ax.set_ylabel("Potential E [V vs SHE]")
@@ -157,12 +149,15 @@ ax.set_title(
     f"Fe–H2O Pourbaix Diagram @ {temp_c}°C, log a(Fe2+)={log_a_fe2}, log a(Fe3+)={log_a_fe3}"
 )
 
-# (5) 追加：凡例（沈殿領域）
-handles = []
-if show_precip:
-    handles.append(Patch(facecolor="black", edgecolor="none", alpha=0.18, label="Precipitation region"))
-if len(handles) > 0:
-    ax.legend(handles=handles, loc="upper right", framealpha=0.9)
+# 凡例（沈殿／非沈殿）
+if highlight_precip_only:
+    leg = [
+        Patch(facecolor="#ef4444", edgecolor="none", label="Precipitation (solid stable)"),
+        Patch(facecolor="#9ca3af", edgecolor="none", label="No precipitation (aqueous/metal stable)")
+    ]
+    ax.legend(handles=leg, loc="upper right", framealpha=0.95)
 
 st.pyplot(fig)
+
+
 
